@@ -27,10 +27,17 @@ workflows:
     instance_type: linux_x2
 
     environment:
-      android_signing:
-        - wowonder_keystore
-      groups:
-        - google_play
+      # The keystore lives in the repo at WoWonder/KeyApk/wowondertimelinechat.keystore
+      # (resolved by the "Resolve / generate Android signing keystore" script step).
+      # When you eventually upload it to Codemagic UI -> Code signing identities ->
+      # Android keystores, uncomment the block below and use the same reference name:
+      # android_signing:
+      #   - wowonder_keystore
+      #
+      # The `google_play` variable group is also optional. Uncomment after you've
+      # created it in Codemagic with GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS:
+      # groups:
+      #   - google_play
       vars:
         DOTNET_CHANNEL: "10.0"
         DOTNET_PATH: $CM_BUILD_DIR/dotnet
