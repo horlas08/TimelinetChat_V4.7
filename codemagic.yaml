@@ -1,0 +1,253 @@
+# Codemagic CI/CD configuration for the Nilein .NET Android app.
+#
+# Reference: https://docs.codemagic.io/yaml-quick-start/building-a-dotnet-maui-app/
+#
+# This file expects the following (optional) settings in the Codemagic UI:
+#   * Code signing identities -> Android keystores: upload the production keystore
+#     and reference it as `wowonder_keystore` (the alias used below). When set,
+#     Codemagic exposes CM_KEYSTORE_PATH / CM_KEY_ALIAS / CM_KEYSTORE_PASSWORD /
+#     CM_KEY_PASSWORD to the build.
+#   * Environment variable group `google_play` containing
+#     GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (JSON service account) for build
+#     versioning + Play Store publishing.
+#   * Environment variable `GOOGLE_SERVICES_JSON` (Secure) holding the contents
+#     of WoWonder/google-services.json. If absent, a non-functional stub is
+#     written so the build can still complete.
+#
+# If no keystore is configured anywhere, this workflow will generate a fresh one
+# at WoWonder/KeyApk/wowondertimelinechat.keystore using the alias and passwords
+# already declared in WoWonder.csproj. The generated keystore is uploaded as a
+# build artifact -- download it, store it safely, and upload it to the Codemagic
+# UI so subsequent builds use the same signing key.
+
+workflows:
+  android-workflow:
+    name: Nilein Android
+    max_build_duration: 120
+    instance_type: linux_x2
+
+    environment:
+      android_signing:
+        - wowonder_keystore
+      groups:
+        - google_play
+      vars:
+        DOTNET_CHANNEL: "10.0"
+        DOTNET_PATH: $CM_BUILD_DIR/dotnet
+        DOTNET: $CM_BUILD_DIR/dotnet/dotnet
+        PROJECT_PATH: WoWonder/WoWonder.csproj
+        PACKAGE_NAME: com.nilein.app
+        TARGET_FRAMEWORK: net10.0-android
+        APP_DISPLAY_VERSION: "1.0"
+        KEYSTORE_LOCAL_PATH: WoWonder/KeyApk/wowondertimelinechat.keystore
+        KEY_ALIAS_FALLBACK: wowondertimelinechat
+        KEY_PASSWORD_FALLBACK: aaaaaaaa
+        KEYSTORE_PASSWORD_FALLBACK: aaaaaaaa
+        GOOGLE_SERVICES_JSON_PATH: WoWonder/google-services.json
+
+    triggering:
+      events:
+        - push
+        - tag
+        - pull_request
+      branch_patterns:
+        - pattern: "*"
+          include: true
+
+    cache:
+      cache_paths:
+        - $CM_BUILD_DIR/.nuget
+        - $HOME/.nuget/packages
+
+    scripts:
+      - name: Install .NET SDK
+        script: |
+          set -euo pipefail
+          wget -q https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel "$DOTNET_CHANNEL" --install-dir "$DOTNET_PATH"
+          $DOTNET --info
+
+      - name: Install Android workload
+        script: |
+          set -euo pipefail
+          $DOTNET nuget locals all --clear
+          $DOTNET workload install android \
+            --source https://api.nuget.org/v3/index.json
+
+      - name: Materialize google-services.json (if missing)
+        script: |
+          set -euo pipefail
+          if [ -f "$GOOGLE_SERVICES_JSON_PATH" ]; then
+            echo "google-services.json already present in repo."
+          elif [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            echo "Writing google-services.json from GOOGLE_SERVICES_JSON env var."
+            printf '%s' "$GOOGLE_SERVICES_JSON" > "$GOOGLE_SERVICES_JSON_PATH"
+          else
+            echo "::warning:: No google-services.json found and GOOGLE_SERVICES_JSON env var is empty."
+            echo "::warning:: Writing the Nilein Firebase config inlined here as a fallback."
+            cat > "$GOOGLE_SERVICES_JSON_PATH" <<'JSON'
+          {
+            "project_info": {
+              "project_number": "78626627575",
+              "project_id": "nileinapp",
+              "storage_bucket": "nileinapp.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:78626627575:android:09e336f6b57d61d795d8f2",
+                  "android_client_info": {
+                    "package_name": "com.nilein.app"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  { "current_key": "AIzaSyB6mpGhFwcpX1afMNfFGshLT5KNkbcwtUs" }
+                ],
+                "services": {
+                  "appinvite_service": { "other_platform_oauth_client": [] }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+          fi
+
+      - name: Resolve / generate Android signing keystore
+        script: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$KEYSTORE_LOCAL_PATH")"
+
+          if [ -n "${CM_KEYSTORE_PATH:-}" ] && [ -f "${CM_KEYSTORE_PATH}" ]; then
+            echo "Using keystore from Codemagic Code signing identities ($CM_KEYSTORE_PATH)."
+            cp "$CM_KEYSTORE_PATH" "$KEYSTORE_LOCAL_PATH"
+            RESOLVED_KEY_ALIAS="$CM_KEY_ALIAS"
+            RESOLVED_KEY_PASSWORD="$CM_KEY_PASSWORD"
+            RESOLVED_KEYSTORE_PASSWORD="$CM_KEYSTORE_PASSWORD"
+            GENERATED_KEYSTORE="false"
+          elif [ -f "$KEYSTORE_LOCAL_PATH" ]; then
+            echo "Using existing keystore committed to the repo at $KEYSTORE_LOCAL_PATH."
+            RESOLVED_KEY_ALIAS="$KEY_ALIAS_FALLBACK"
+            RESOLVED_KEY_PASSWORD="$KEY_PASSWORD_FALLBACK"
+            RESOLVED_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD_FALLBACK"
+            GENERATED_KEYSTORE="false"
+          else
+            echo "::warning:: No keystore was uploaded to Codemagic and no keystore exists in the repo."
+            echo "::warning:: Generating a fresh keystore at $KEYSTORE_LOCAL_PATH so this build can sign."
+            echo "::warning:: Download it from build artifacts and upload it to Codemagic for future builds."
+            echo "::warning:: The Google Play Store will REJECT future updates not signed with the same key."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_LOCAL_PATH" \
+              -storetype JKS \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -alias "$KEY_ALIAS_FALLBACK" \
+              -storepass "$KEYSTORE_PASSWORD_FALLBACK" \
+              -keypass "$KEY_PASSWORD_FALLBACK" \
+              -dname "CN=Nilein, OU=Mobile, O=Nilein, L=Cairo, ST=Cairo, C=EG"
+            RESOLVED_KEY_ALIAS="$KEY_ALIAS_FALLBACK"
+            RESOLVED_KEY_PASSWORD="$KEY_PASSWORD_FALLBACK"
+            RESOLVED_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD_FALLBACK"
+            GENERATED_KEYSTORE="true"
+          fi
+
+          ABSOLUTE_KEYSTORE_PATH="$(cd "$(dirname "$KEYSTORE_LOCAL_PATH")" && pwd)/$(basename "$KEYSTORE_LOCAL_PATH")"
+
+          echo "ANDROID_KEYSTORE_PATH=$ABSOLUTE_KEYSTORE_PATH" >> $CM_ENV
+          echo "ANDROID_KEY_ALIAS=$RESOLVED_KEY_ALIAS" >> $CM_ENV
+          echo "ANDROID_KEY_PASSWORD=$RESOLVED_KEY_PASSWORD" >> $CM_ENV
+          echo "ANDROID_KEYSTORE_PASSWORD=$RESOLVED_KEYSTORE_PASSWORD" >> $CM_ENV
+          echo "GENERATED_KEYSTORE=$GENERATED_KEYSTORE" >> $CM_ENV
+
+          echo "--- Keystore details ---"
+          keytool -list -v \
+            -keystore "$ABSOLUTE_KEYSTORE_PATH" \
+            -storepass "$RESOLVED_KEYSTORE_PASSWORD" | head -n 30
+
+      - name: Compute build version
+        script: |
+          set -euo pipefail
+          UPDATED_BUILD_NUMBER="${BUILD_NUMBER:-1}"
+          if command -v google-play >/dev/null 2>&1 && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS:-}" ]; then
+            LATEST_BUILD_NUMBER=$(google-play get-latest-build-number \
+              --package-name "$PACKAGE_NAME" 2>/dev/null || true)
+            if [ -n "$LATEST_BUILD_NUMBER" ]; then
+              UPDATED_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
+            fi
+          fi
+          echo "UPDATED_BUILD_NUMBER=$UPDATED_BUILD_NUMBER" >> $CM_ENV
+          echo "Building with ApplicationVersion=$UPDATED_BUILD_NUMBER, ApplicationDisplayVersion=$APP_DISPLAY_VERSION"
+
+      - name: Restore NuGet packages
+        script: |
+          set -euo pipefail
+          $DOTNET restore "$PROJECT_PATH"
+
+      - name: Publish signed Android app
+        script: |
+          set -euo pipefail
+          $DOTNET publish "$PROJECT_PATH" \
+            -f "$TARGET_FRAMEWORK" \
+            -c Release \
+            -p:AndroidKeyStore=True \
+            -p:AndroidSigningKeyStore="$ANDROID_KEYSTORE_PATH" \
+            -p:AndroidSigningKeyAlias="$ANDROID_KEY_ALIAS" \
+            -p:AndroidSigningKeyPass="$ANDROID_KEY_PASSWORD" \
+            -p:AndroidSigningStorePass="$ANDROID_KEYSTORE_PASSWORD" \
+            -p:ApplicationVersion="$UPDATED_BUILD_NUMBER" \
+            -p:ApplicationDisplayVersion="$APP_DISPLAY_VERSION" \
+            -p:AndroidPackageFormats="apk;aab" \
+            -o "$CM_BUILD_DIR/artifacts"
+
+          echo "--- Built artifacts ---"
+          ls -lah "$CM_BUILD_DIR/artifacts" || true
+
+      - name: Stage generated keystore as artifact (first run only)
+        script: |
+          set -euo pipefail
+          if [ "${GENERATED_KEYSTORE:-false}" = "true" ]; then
+            mkdir -p "$CM_BUILD_DIR/artifacts/signing"
+            cp "$ANDROID_KEYSTORE_PATH" "$CM_BUILD_DIR/artifacts/signing/"
+            cat > "$CM_BUILD_DIR/artifacts/signing/README.txt" <<EOF
+          A new Android signing keystore was generated by Codemagic because none was
+          provided. Treat this file as a SECRET.
+
+          Keystore file : $(basename "$ANDROID_KEYSTORE_PATH")
+          Key alias     : $ANDROID_KEY_ALIAS
+          Keystore pass : $ANDROID_KEYSTORE_PASSWORD
+          Key password  : $ANDROID_KEY_PASSWORD
+
+          Next steps:
+            1. Download this folder from the build artifacts.
+            2. Store the keystore in a secure location (password manager, secret store).
+            3. In Codemagic UI: Team settings -> codemagic.yaml settings ->
+               Code signing identities -> Android keystores -> upload it with
+               reference name "wowonder_keystore" using the credentials above.
+            4. Future builds will reuse the uploaded keystore automatically.
+          EOF
+          fi
+
+    artifacts:
+      - $CM_BUILD_DIR/artifacts/*.apk
+      - $CM_BUILD_DIR/artifacts/*.aab
+      - $CM_BUILD_DIR/artifacts/*Signed.apk
+      - $CM_BUILD_DIR/artifacts/*Signed.aab
+      - $CM_BUILD_DIR/artifacts/signing/*
+
+    publishing:
+      email:
+        recipients:
+          - your.email@example.com
+        notify:
+          success: true
+          failure: true
+      # Uncomment after you have at least one manual Play Console upload of this
+      # package name and a service account JSON stored in the `google_play`
+      # variable group.
+      # google_play:
+      #   credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+      #   track: internal
+      #   submit_as_draft: true

@@ -25,7 +25,7 @@ namespace WoWonder
         //Main Settings >>>>>
         //*********************************************************
         public static string Version = "4.7";
-        public static readonly string ApplicationName = "WoWonder Combined";
+        public static readonly string ApplicationName = "Nilein";
         public static readonly string DatabaseName = "WowonderSocial";
 
         // Friend system = 0 , follow system = 1

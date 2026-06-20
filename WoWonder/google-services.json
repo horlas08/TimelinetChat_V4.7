@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "78626627575",
+    "project_id": "nileinapp",
+    "storage_bucket": "nileinapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:78626627575:android:09e336f6b57d61d795d8f2",
+        "android_client_info": {
+          "package_name": "com.nilein.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6mpGhFwcpX1afMNfFGshLT5KNkbcwtUs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

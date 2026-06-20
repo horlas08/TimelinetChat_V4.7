@@ -27,6 +27,12 @@ local.properties
 *.aab
 google-services.json
 
+## Force-include the production signing key and Firebase config so Codemagic
+## can build directly from the repo. Treat these files as SECRETS -- anyone
+## with repo access can sign apps as you / call your Firebase project.
+!WoWonder/KeyApk/wowondertimelinechat.keystore
+!WoWonder/google-services.json
+
 ## Xamarin
 *.userprefs
 
