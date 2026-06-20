@@ -24,7 +24,7 @@ workflows:
   android-workflow:
     name: Nilein Android
     max_build_duration: 120
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
 
     environment:
       # The keystore lives in the repo at WoWonder/KeyApk/wowondertimelinechat.keystore
