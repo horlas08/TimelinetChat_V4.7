@@ -206,7 +206,7 @@ workflows:
             -p:AndroidSigningStorePass="$ANDROID_KEYSTORE_PASSWORD" \
             -p:ApplicationVersion="$UPDATED_BUILD_NUMBER" \
             -p:ApplicationDisplayVersion="$APP_DISPLAY_VERSION" \
-            -p:AndroidPackageFormats="apk;aab" \
+            -p:AndroidPackageFormats="apk%3Baab" \
             -o "$CM_BUILD_DIR/artifacts"
 
           echo "--- Built artifacts ---"
