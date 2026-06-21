@@ -227,8 +227,15 @@ workflows:
           ARTIFACTS_ROOT="$CM_BUILD_DIR/artifacts"
           UNIVERSAL_DIR="$ARTIFACTS_ROOT/universal"
           SPLIT_DIR="$ARTIFACTS_ROOT/split"
-          mkdir -p "$UNIVERSAL_DIR" "$SPLIT_DIR"
+          AAB_DIR="$ARTIFACTS_ROOT/aab"
+          WORK_DIR="$CM_BUILD_DIR/publish_work"
+          mkdir -p "$UNIVERSAL_DIR" "$SPLIT_DIR" "$AAB_DIR"
+          rm -rf "$WORK_DIR" && mkdir -p "$WORK_DIR"
 
+          # `dotnet publish` ignores AndroidCreatePackagePerAbi and does not
+          # reliably honour multi-format requests, so we run one publish per
+          # target. A single -r (RuntimeIdentifier) yields a single-ABI APK;
+          # the project's RuntimeIdentifiers (arm64+arm) yield a universal one.
           COMMON_ARGS=(
             -f "$TARGET_FRAMEWORK"
             -c Release
@@ -242,26 +249,48 @@ workflows:
             -p:ApplicationDisplayVersion="$APP_DISPLAY_VERSION"
           )
 
-          echo "=== 1/2 Universal signed APK + AAB (all ABIs in one APK) ==="
-          $DOTNET publish "$PROJECT_PATH" \
-            "${COMMON_ARGS[@]}" \
-            -p:AndroidPackageFormats=apk%3Baab \
-            -p:AndroidCreatePackagePerAbi=false \
-            -o "$UNIVERSAL_DIR"
+          # Copy the first file in $1 matching name pattern $2 to path $3.
+          collect() {
+            local src
+            src="$(find "$1" -maxdepth 1 -type f -name "$2" 2>/dev/null | head -n 1 || true)"
+            if [ -n "$src" ] && [ -f "$src" ]; then
+              cp "$src" "$3"
+              echo "Collected: $3 ($(du -h "$src" | cut -f1)) <- $(basename "$src")"
+            else
+              echo "::warning:: No file matching '$2' found in $1"
+            fi
+          }
 
-          echo "=== 2/2 Per-ABI split signed APKs (armeabi-v7a + arm64-v8a) ==="
-          $DOTNET publish "$PROJECT_PATH" \
-            "${COMMON_ARGS[@]}" \
-            -p:AndroidPackageFormats=apk \
-            -p:AndroidCreatePackagePerAbi=true \
-            -o "$SPLIT_DIR"
+          echo "=== 1/4 Universal APK (arm64-v8a + armeabi-v7a in one APK) ==="
+          $DOTNET publish "$PROJECT_PATH" "${COMMON_ARGS[@]}" \
+            -p:AndroidPackageFormat=apk \
+            -o "$WORK_DIR/universal"
+          collect "$WORK_DIR/universal" "*-Signed.apk" "$UNIVERSAL_DIR/com.nilein.app-universal-Signed.apk"
+          collect "$WORK_DIR/universal" "com.nilein.app.apk" "$UNIVERSAL_DIR/com.nilein.app-universal.apk"
 
-          echo "--- Universal artifacts ---"
-          ls -lah "$UNIVERSAL_DIR" || true
-          echo "--- Split artifacts ---"
-          ls -lah "$SPLIT_DIR" || true
-          echo "--- All artifacts ---"
-          find "$ARTIFACTS_ROOT" -type f \( -name '*.apk' -o -name '*.aab' \) -print
+          echo "=== 2/4 AAB (Google Play; Play generates per-device splits) ==="
+          $DOTNET publish "$PROJECT_PATH" "${COMMON_ARGS[@]}" \
+            -p:AndroidPackageFormat=aab \
+            -o "$WORK_DIR/aab"
+          collect "$WORK_DIR/aab" "*-Signed.aab" "$AAB_DIR/com.nilein.app-Signed.aab"
+          collect "$WORK_DIR/aab" "com.nilein.app.aab" "$AAB_DIR/com.nilein.app.aab"
+
+          echo "=== 3/4 Split APK: arm64-v8a (64-bit phones) ==="
+          $DOTNET publish "$PROJECT_PATH" "${COMMON_ARGS[@]}" \
+            -r android-arm64 \
+            -p:AndroidPackageFormat=apk \
+            -o "$WORK_DIR/arm64"
+          collect "$WORK_DIR/arm64" "*-Signed.apk" "$SPLIT_DIR/com.nilein.app-arm64-v8a-Signed.apk"
+
+          echo "=== 4/4 Split APK: armeabi-v7a (32-bit phones, e.g. Tecno Spark 8) ==="
+          $DOTNET publish "$PROJECT_PATH" "${COMMON_ARGS[@]}" \
+            -r android-arm \
+            -p:AndroidPackageFormat=apk \
+            -o "$WORK_DIR/arm"
+          collect "$WORK_DIR/arm" "*-Signed.apk" "$SPLIT_DIR/com.nilein.app-armeabi-v7a-Signed.apk"
+
+          echo "--- Final artifacts ---"
+          find "$ARTIFACTS_ROOT" -type f \( -name '*.apk' -o -name '*.aab' \) -exec ls -lah {} \;
 
       - name: Stage generated keystore as artifact (first run only)
         script: |
@@ -290,11 +319,8 @@ workflows:
 
     artifacts:
       - $CM_BUILD_DIR/artifacts/universal/*.apk
-      - $CM_BUILD_DIR/artifacts/universal/*.aab
-      - $CM_BUILD_DIR/artifacts/universal/*Signed.apk
-      - $CM_BUILD_DIR/artifacts/universal/*Signed.aab
+      - $CM_BUILD_DIR/artifacts/aab/*.aab
       - $CM_BUILD_DIR/artifacts/split/*.apk
-      - $CM_BUILD_DIR/artifacts/split/*Signed.apk
       - $CM_BUILD_DIR/artifacts/signing/*
 
     publishing:
