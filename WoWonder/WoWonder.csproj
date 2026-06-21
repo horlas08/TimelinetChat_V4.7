@@ -47,9 +47,9 @@
 		<!--<AndroidPackageFormats>apk;aab</AndroidPackageFormats>-->
 		<NoWarn>1701;1702;CA1416;CA1422;CS0618;SYSLIB0039;NU1202;NETSDK1202</NoWarn>
 		<!--for Release Recommended : android-arm - android-arm64 -->
-		<!-- Include both 32-bit (armeabi-v7a) and 64-bit (arm64-v8a) so the APK
-		     installs on budget/Go-edition devices (e.g. Tecno Spark 8) that only
-		     accept 32-bit native libraries. -->
+		<!-- Codemagic publishes three outputs in Release:
+		     universal/  -> signed fat APK (arm + arm64) + AAB for Play Store
+		     split/      -> signed per-ABI APKs (armeabi-v7a, arm64-v8a) -->
 		<RuntimeIdentifiers>android-arm64;android-arm</RuntimeIdentifiers>
 		<PublishTrimmed>True</PublishTrimmed>
 		<RunAOTCompilation>True</RunAOTCompilation>

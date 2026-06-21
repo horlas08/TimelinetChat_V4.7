@@ -224,22 +224,44 @@ workflows:
       - name: Publish signed Android app
         script: |
           set -euo pipefail
-          $DOTNET publish "$PROJECT_PATH" \
-            -f "$TARGET_FRAMEWORK" \
-            -c Release \
-            -p:AndroidSdkDirectory="$ANDROID_SDK_ROOT_RESOLVED" \
-            -p:AndroidKeyStore=True \
-            -p:AndroidSigningKeyStore="$ANDROID_KEYSTORE_PATH" \
-            -p:AndroidSigningKeyAlias="$ANDROID_KEY_ALIAS" \
-            -p:AndroidSigningKeyPass="$ANDROID_KEY_PASSWORD" \
-            -p:AndroidSigningStorePass="$ANDROID_KEYSTORE_PASSWORD" \
-            -p:ApplicationVersion="$UPDATED_BUILD_NUMBER" \
-            -p:ApplicationDisplayVersion="$APP_DISPLAY_VERSION" \
-            -p:AndroidPackageFormats="apk%3Baab" \
-            -o "$CM_BUILD_DIR/artifacts"
+          ARTIFACTS_ROOT="$CM_BUILD_DIR/artifacts"
+          UNIVERSAL_DIR="$ARTIFACTS_ROOT/universal"
+          SPLIT_DIR="$ARTIFACTS_ROOT/split"
+          mkdir -p "$UNIVERSAL_DIR" "$SPLIT_DIR"
 
-          echo "--- Built artifacts ---"
-          ls -lah "$CM_BUILD_DIR/artifacts" || true
+          COMMON_ARGS=(
+            -f "$TARGET_FRAMEWORK"
+            -c Release
+            -p:AndroidSdkDirectory="$ANDROID_SDK_ROOT_RESOLVED"
+            -p:AndroidKeyStore=True
+            -p:AndroidSigningKeyStore="$ANDROID_KEYSTORE_PATH"
+            -p:AndroidSigningKeyAlias="$ANDROID_KEY_ALIAS"
+            -p:AndroidSigningKeyPass="$ANDROID_KEY_PASSWORD"
+            -p:AndroidSigningStorePass="$ANDROID_KEYSTORE_PASSWORD"
+            -p:ApplicationVersion="$UPDATED_BUILD_NUMBER"
+            -p:ApplicationDisplayVersion="$APP_DISPLAY_VERSION"
+          )
+
+          echo "=== 1/2 Universal signed APK + AAB (all ABIs in one APK) ==="
+          $DOTNET publish "$PROJECT_PATH" \
+            "${COMMON_ARGS[@]}" \
+            -p:AndroidPackageFormats=apk\;aab \
+            -p:AndroidCreatePackagePerAbi=false \
+            -o "$UNIVERSAL_DIR"
+
+          echo "=== 2/2 Per-ABI split signed APKs (armeabi-v7a + arm64-v8a) ==="
+          $DOTNET publish "$PROJECT_PATH" \
+            "${COMMON_ARGS[@]}" \
+            -p:AndroidPackageFormats=apk \
+            -p:AndroidCreatePackagePerAbi=true \
+            -o "$SPLIT_DIR"
+
+          echo "--- Universal artifacts ---"
+          ls -lah "$UNIVERSAL_DIR" || true
+          echo "--- Split artifacts ---"
+          ls -lah "$SPLIT_DIR" || true
+          echo "--- All artifacts ---"
+          find "$ARTIFACTS_ROOT" -type f \( -name '*.apk' -o -name '*.aab' \) -print
 
       - name: Stage generated keystore as artifact (first run only)
         script: |
@@ -267,10 +289,12 @@ workflows:
           fi
 
     artifacts:
-      - $CM_BUILD_DIR/artifacts/*.apk
-      - $CM_BUILD_DIR/artifacts/*.aab
-      - $CM_BUILD_DIR/artifacts/*Signed.apk
-      - $CM_BUILD_DIR/artifacts/*Signed.aab
+      - $CM_BUILD_DIR/artifacts/universal/*.apk
+      - $CM_BUILD_DIR/artifacts/universal/*.aab
+      - $CM_BUILD_DIR/artifacts/universal/*Signed.apk
+      - $CM_BUILD_DIR/artifacts/universal/*Signed.aab
+      - $CM_BUILD_DIR/artifacts/split/*.apk
+      - $CM_BUILD_DIR/artifacts/split/*Signed.apk
       - $CM_BUILD_DIR/artifacts/signing/*
 
     publishing:
