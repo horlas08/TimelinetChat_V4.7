@@ -245,7 +245,7 @@ workflows:
           echo "=== 1/2 Universal signed APK + AAB (all ABIs in one APK) ==="
           $DOTNET publish "$PROJECT_PATH" \
             "${COMMON_ARGS[@]}" \
-            -p:AndroidPackageFormats=apk\;aab \
+            -p:AndroidPackageFormats=apk%3Baab \
             -p:AndroidCreatePackagePerAbi=false \
             -o "$UNIVERSAL_DIR"
 
